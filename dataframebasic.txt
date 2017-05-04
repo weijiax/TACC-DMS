@@ -1,0 +1,99 @@
+//DataFrame Basic 
+//loading file from local file system
+val df=spark.read.format("csv")
+            .option("header", true)
+            .load("file:////work/00791/xwj/DMS/R-training/RDataMining/mtcars.csv")
+//loading file from hdfs file system 
+val df2=spark.read.format("csv")
+            .option("header", true)
+            .load("/tmp/data/mtcars.csv")            
+df.show()
+df.printSchema
+df.describe().show
+df.describe("mpg").show
+
+//Read and Write with DataFrame
+df.show(100)
+df.write.format("json").mode("overwrite").save("cars.json")
+df.write.parquet("cars.parquet")
+df.write.option("delimiter","\t").csv("cars.tab")
+val df_json = spark.read.json("cars.json")
+val df_parquet = spark.read.parquet("cars.parquet")
+df_json.show
+df_parquet.show
+
+//RDD vs. Dataset Vs. DataFrame
+val rdd = sc.parallelize(0 until 100)
+val rdd_df =rdd.toDF
+val rdd_ds = rdd.toDS
+
+rdd.filter (_ < 10).collect
+rdd_df.filter("value < 10").show
+rdd_ds.filter("value < 10").show
+rdd_ds.filter(_ < 10).show
+
+rdd.map(_ * 2).collect
+rdd_ds.map(_ * 2).show
+rdd_df.map(_ * 2).show //this line will fail 
+rdd_df.select('value * 2).show 
+
+//RDD to DataFrame
+val rdd = sc.parallelize(0 until 10000)
+val simple_rdd_df = rdd.toDF
+simple_rdd_df.show
+
+case class Person(id: Int, name: String)
+val person = sc.parallelize(Seq( Person(1, "Mike"), 
+                                 Person(2, "Smith"), 
+                                 Person(3, "Brooke")))
+val person_df = person.toDF
+person_df.show
+
+//SparkSQL Basic
+df.select("model","mpg", "wt").show
+df.select($"model", $"mpg" * 1.6).show
+df.select("model","mpg", "wt", "cyl")
+  .filter("cyl > 4").show
+df.groupBy("cyl").count().show
+
+//Running SQl statemnt
+df.createOrReplaceTempView("cars")
+spark.sql("SELECT * FROM cars WHERE cyl = 6")
+     .show
+spark.sql("SELECT cyl, avg(mpg) as avg_mpg, count(1) as count "+
+          "from cars "+
+          "group by cyl")
+     .show
+
+//using dataframe and sparkSQL in analysis 
+import org.apache.spark.sql.functions._
+import org.apache.spark.ml.classification.LogisticRegression
+import org.apache.spark.ml.feature.VectorAssembler
+import org.apache.spark.ml.Pipeline
+
+val cars = spark.read.format("csv").option("header", true).load("/tmp/data/mtcars.csv")
+                .selectExpr("model", "mpg + 0.0 as mpg", "disp + 0.0 as disp", 
+                            "hp + 0.0 as hp", "drat + 0.0 as drat", "wt + 0.0 as wt", 
+                            "cyl + 0.0 as label")
+                
+val training= cars.sample(false, 0.8)
+val test= cars.except(training)
+
+val assembler = new VectorAssembler()
+  .setInputCols(Array("mpg", "disp", "hp", "drat", "wt"))
+  .setOutputCol("features")
+  
+val lr = new LogisticRegression()
+  .setMaxIter(10)
+  .setRegParam(0.2)
+  .setElasticNetParam(0.0)
+
+val pipeline = new Pipeline().setStages(Array(assembler, lr))
+val lrModel = pipeline.fit(training)
+
+val result = lrModel.transform(test).select('model, 'label, 'prediction)
+result.show
+
+
+
+
